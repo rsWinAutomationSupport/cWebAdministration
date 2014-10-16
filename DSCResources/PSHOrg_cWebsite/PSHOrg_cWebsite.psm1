@@ -45,7 +45,7 @@ function Get-TargetResource
             Throw "Please ensure that WebAdministration module is installed."
         }
 
-        $Website = Get-Website -Name $Name
+        $Website = Get-Website | Where-Object {$_.Name -eq $name}
 
         if ($Website.count -eq 0) # No Website exists with this name.
         {
@@ -77,13 +77,14 @@ function Get-TargetResource
 
         # Add all Website properties to the hash table
         $getTargetResourceResult = @{
-    	                                Name = $Website.Name; 
+                                        Name = $Website.Name; 
                                         Ensure = $ensureResult;
                                         PhysicalPath = $Website.physicalPath;
                                         State = $Website.state;
                                         ID = $Website.id;
                                         ApplicationPool = $Website.applicationPool;
                                         BindingInfo = $CimBindings;
+                                        webConfigProp = $CimWebConfigProp;
                                     }
         
         return $getTargetResourceResult;
@@ -112,7 +113,10 @@ function Set-TargetResource
 
         [string]$ApplicationPool,
 
-        [Microsoft.Management.Infrastructure.CimInstance[]]$BindingInfo
+        [Microsoft.Management.Infrastructure.CimInstance[]]$BindingInfo,
+
+        [Microsoft.Management.Infrastructure.CimInstance[]]$webConfigProp
+
     )
  
     $getTargetResourceResult = $null;
@@ -127,18 +131,21 @@ function Set-TargetResource
         #Remove bindings from parameters if they exist
         #Bindings will be added to site using separate cmdlet
         $Result = $psboundparameters.Remove("BindingInfo");
+        
+        #Remove web configuration properties from parameters if they exist
+        #web configuration properties will be added to site using separate cmdlet
+        $Result = $psboundparameters.Remove("webConfigProp");
 
         # Check if WebAdministration module is present for IIS cmdlets
         if(!(Get-Module -ListAvailable -Name WebAdministration))
         {
             Throw "Please ensure that WebAdministration module is installed."
         }
-        $website = get-website $Name
+        $website = Get-Website | Where-Object {$_.Name -eq $name}
 
         if($website -ne $null)
         {
             #update parameters as required
-
             $UpdateNotRequired = $true
 
             #Update Physical Path if required
@@ -150,6 +157,68 @@ function Set-TargetResource
                 Write-Verbose("Physical path for website $Name has been updated to $PhysicalPath");
             }
 
+            #Update Web Configuration Properties if needed
+            if ($webConfigProp -ne $null)
+            {
+                foreach ($prop in $webConfigProp)
+                {
+                    #if location has a value we need to combine it with pspath to do get-webconfigurationproperty
+                    if($prop.CimInstanceProperties["Location"].Value)
+                    {
+                        $PSPath = $prop.CimInstanceProperties["PSPath"].Value + "/" + $prop.CimInstanceProperties["Location"].Value
+                    }
+                    else
+                    {
+                        $PSPath = $prop.CimInstanceProperties["PSPath"].Value
+                    }
+                    $propObject = Get-WebConfigurationProperty -Filter $prop.CimInstanceProperties["Filter"].Value -PSPath $PSPath -Name $prop.CimInstanceProperties["Name"].Value | Select Value
+                    
+                    #get-webconfigurationproperty returns values differently depending on the property so we have to check if .Value is null or not and proceed accordingly
+                    if($propObject[0].Value)
+                    {
+                        if($propObject[0].Value.toString() -ne $prop.CimInstanceProperties["Value"].Value.toString())#produces inconsistent results without toString
+                        {
+                            $UpdateNotRequired = $false
+                            
+                            #use the location parameter if it is specified
+                            if($prop.CimInstanceProperties["Location"].Value)
+                            {
+                                Set-WebConfigurationProperty -filter $prop.CimInstanceProperties["Filter"].Value -pspath $prop.CimInstanceProperties["PSPath"].Value -location $prop.CimInstanceProperties["Location"].Value -name $prop.CimInstanceProperties["Name"].Value -value $prop.CimInstanceProperties["Value"].Value
+                            }
+                            else
+                            {
+                                Set-WebConfigurationProperty -filter $prop.CimInstanceProperties["Filter"].Value -pspath $prop.CimInstanceProperties["PSPath"].Value -name $prop.CimInstanceProperties["Name"].Value -value $prop.CimInstanceProperties["Value"].Value
+                            }
+                            
+                            $propName = $prop.CimInstanceProperties["Name"].Value
+                            Write-Verbose("$propName for website $Name have been updated.")
+                        }
+                    }
+                    else
+                    {
+                        if($propObject[0].toString() -ne $prop.CimInstanceProperties["Value"].Value.toString())#produces inconsistent results without toString
+                        {
+                            $UpdateNotRequired = $false
+                            
+                            #use the location parameter if it is specified
+                            if($prop.CimInstanceProperties["Location"].Value)
+                            {
+                                Set-WebConfigurationProperty -filter $prop.CimInstanceProperties["Filter"].Value -pspath $prop.CimInstanceProperties["PSPath"].Value -location $prop.CimInstanceProperties["Location"].Value -name $prop.CimInstanceProperties["Name"].Value -value $prop.CimInstanceProperties["Value"].Value
+                            }
+                            else
+                            {
+                                Set-WebConfigurationProperty -filter $prop.CimInstanceProperties["Filter"].Value -pspath $prop.CimInstanceProperties["PSPath"].Value -name $prop.CimInstanceProperties["Name"].Value -value $prop.CimInstanceProperties["Value"].Value
+                            }
+                            
+                            $propName = $prop.CimInstanceProperties["Name"].Value
+                            Write-Verbose("$propName for website $Name have been updated.")
+                        }
+                    }
+                    
+                
+                }
+            }
+        
             #Update Bindings if required
             if ($BindingInfo -ne $null)
             {
@@ -206,7 +275,7 @@ function Set-TargetResource
 
             if($UpdateNotRequired)
             {
-                Write-Verbose("Website $Name already exists and properties do not need to be udpated.");
+                Write-Verbose("Website $Name already exists and properties do not need to be updated.");
             }
             
 
@@ -215,9 +284,18 @@ function Set-TargetResource
         {
             try
             {
-                $Website = New-Website @psboundparameters
+                $Websites = Get-Website
+                if ($Websites -eq $null)
+                {
+                    # We do not have any sites this will cause a break in 2008R2
+                    $Website = New-Website @psboundparameters -ID 0
+                }
+                else
+                {
+                    $Website = New-Website @psboundparameters
+                }
                 $Result = Stop-Website $Website.name -ErrorAction Stop
-            
+        
                 #Clear default bindings if new bindings defined and are different
                 if($BindingInfo -ne $null)
                 {
@@ -227,6 +305,24 @@ function Set-TargetResource
                     }
                 }
 
+                #Update Web Configuration Properties if needed
+                if ($webConfigProp -ne $null)
+                {
+
+                    foreach ($prop in $webConfigProp)
+                    {
+
+                        #use the location parameter if it is specified
+                        if($prop.CimInstanceProperties["Location"].Value)
+                        {
+                            Set-WebConfigurationProperty -filter $prop.CimInstanceProperties["Filter"].Value -pspath $prop.CimInstanceProperties["PSPath"].Value -location $prop.CimInstanceProperties["Location"].Value -name $prop.CimInstanceProperties["Name"].Value -value $prop.CimInstanceProperties["Value"].Value
+                        }
+                        else
+                        {
+                            Set-WebConfigurationProperty -filter $prop.CimInstanceProperties["Filter"].Value -pspath $prop.CimInstanceProperties["PSPath"].Value -name $prop.CimInstanceProperties["Name"].Value -value $prop.CimInstanceProperties["Value"].Value
+                        }
+                    }
+                }
                 Write-Verbose("successfully created website $Name")
                 
                 #Start site if required
@@ -256,7 +352,7 @@ function Set-TargetResource
     { 
         try
         {
-            $website = get-website $Name
+            $website = Get-Website | Where-Object {$_.Name -eq $name}
             if($website -ne $null)
             {
                 Remove-website -name $Name
@@ -305,9 +401,11 @@ function Test-TargetResource
 
         [string]$ApplicationPool,
 
-        [Microsoft.Management.Infrastructure.CimInstance[]]$BindingInfo
+        [Microsoft.Management.Infrastructure.CimInstance[]]$BindingInfo,
+        
+        [Microsoft.Management.Infrastructure.CimInstance[]]$webConfigProp
     )
- 
+
     $DesiredConfigurationMatch = $true;
 
     # Check if WebAdministration module is present for IIS cmdlets
@@ -316,10 +414,10 @@ function Test-TargetResource
         Throw "Please ensure that WebAdministration module is installed."
     }
 
-    $website = Get-Website -Name $Name
+    $website = Get-Website | Where-Object {$_.Name -eq $name}
     $Stop = $true
 
-    Do
+    Do  
     {
         #Check Ensure
         if(($Ensure -eq "Present" -and $website -eq $null) -or ($Ensure -eq "Absent" -and $website -ne $null))
@@ -342,37 +440,74 @@ function Test-TargetResource
 
             #Check State
             if($website.state -ne $State -and $State -ne $null)
-                            {
-            $DesiredConfigurationMatch = $false
-            Write-Verbose("The state of Website $Name does not match the desired state.");
-            break
-        }
+            {
+                $DesiredConfigurationMatch = $false
+                Write-Verbose("The state of Website $Name does not match the desired state.");
+                break
+            }    
 
             #Check Application Pool property 
             if(($ApplicationPool -ne "") -and ($website.applicationPool -ne $ApplicationPool))
-                            {
-            $DesiredConfigurationMatch = $false
-            Write-Verbose("Application Pool for Website $Name does not match the desired state.");
-            break
-        }
-
-            #Check Binding properties
-            if($BindingInfo -ne $null)
             {
-                if(ValidateWebsiteBindings -Name $Name -BindingInfo $BindingInfo)
-                {
-                    $DesiredConfigurationMatch = $false
-                    Write-Verbose("Bindings for website $Name do not mach the desired state.");
-                    break
-                }
-
+                $DesiredConfigurationMatch = $false
+                Write-Verbose("Application Pool for Website $Name does not match the desired state.");
+                break
             }
+
+            #Check Web Configuration Properties
+            foreach ($prop in $webConfigProp)
+            {
+                #if location has a value we need to combine it with pspath to do get-webconfigurationproperty
+                if($prop.CimInstanceProperties["Location"].Value)
+                {
+                    $PSPath = $prop.CimInstanceProperties["PSPath"].Value + "/" + $prop.CimInstanceProperties["Location"].Value
+                }
+                else
+                {
+                    $PSPath = $prop.CimInstanceProperties["PSPath"].Value
+                }
+                $propObject = Get-WebConfigurationProperty -Filter $prop.CimInstanceProperties["Filter"].Value -PSPath $PSPath -Name $prop.CimInstanceProperties["Name"].Value
+                
+                #get-webconfigurationproperty returns values differently depending on the property so we have to check if .Value is null or not and proceed accordingly
+                if ($propObject[0].Value)
+                {
+                    if($propObject[0].Value.toString() -ne $prop.CimInstanceProperties["Value"].Value.toString())#produces inconsistent results without toString
+                    {
+                        $DesiredConfigurationMatch = $false
+                        $propName = $prop.CimInstanceProperties["Name"].Value
+                        Write-Verbose("$propName for Website $Name does not match the desired state.");
+                        break
+                    }
+                }
+                else
+                {                    
+                    if($propObject -ne $prop.CimInstanceProperties["Value"].Value.toString())#produces inconsistent results without toString
+                    {
+                        $DesiredConfigurationMatch = $false
+                        $propName = $prop.CimInstanceProperties["Name"].Value
+                        Write-Verbose("$propName for Website $Name does not match the desired state.");
+                        break
+                    }
+                }    
+            }
+            
+                #Check Binding properties
+                if($BindingInfo -ne $null)
+                {
+                    if(ValidateWebsiteBindings -Name $Name -BindingInfo $BindingInfo)
+                    {
+                        $DesiredConfigurationMatch = $false
+                        Write-Verbose("Bindings for website $Name do not match the desired state.");
+                        break
+                    }
+
+                }
+            
+            $Stop = $false
         }
-
-        $Stop = $false
     }
-    While($Stop)   
-
+	While($Stop) 
+    
     $DesiredConfigurationMatch;
 }
 
@@ -444,7 +579,7 @@ function ValidateWebsiteBindings
     foreach($binding in $BindingInfo)
     {
         # First ensure that desired binding information is valid ie. No duplicate IPAddres, Port, Host name combinations. 
-             
+          
         if (!(EnsurePortIPHostUnique -Port $binding.Port -IPAddress $binding.IPAddress -HostName $Binding.Hostname -BindingInfo $BindingInfo) )
         {
             $errorId = "WebsiteBindingInputInvalidation"; 
@@ -523,7 +658,7 @@ function compareWebsiteBindings
     #check to see if actual settings have been passed in. If not get them from website
     if($ActualBindings -eq $null)
     {
-        $ActualBindings = Get-Website $Name | Get-WebBinding
+        $ActualBindings = Get-Website | Where-Object {$_.Name -eq $Name} | Get-WebBinding
 
         #Format Binding information: Split BindingInfo into individual Properties (IPAddress:Port:HostName)
         $ActualBindingObjects = @()
@@ -729,6 +864,5 @@ function get-WebBindingObject
     return $WebBindingObject
 }
 
+
 #endregion
-
-
