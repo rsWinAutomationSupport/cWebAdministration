@@ -2,6 +2,8 @@
 # Version number of this module.
 ModuleVersion = '1.0'
 
+RootModule = 'PSHOrg_cAppPool.psm1'
+
 # Author of this module
 Author = 'Ned Bellavance'
 
