@@ -40,7 +40,7 @@ function Get-TargetResource
         {
             $ensureResult = "Absent";
         }
-        elseif ($AppPool.count -eq 1) # A single AppPool exists with this name.
+        elseif ($AppPools.count -eq 1) # A single AppPool exists with this name.
         {
             $ensureResult = "Present"
 
