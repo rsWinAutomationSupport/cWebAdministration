@@ -37,6 +37,7 @@ class PSHOrg_cAppPool : OMI_BaseResource
 	[write] string restartPrivateMemoryLimit;
 	[write] string restartRequestsLimit;
 	[write] string restartTimeLimit;
+	[write] string restartSchedule[];
 	[write,ValueMap{"HttpLevel","TcpLevel"},Values{"HttpLevel","TcpLevel"}] string loadBalancerCapabilities;
 	[write,ValueMap{"true","false"},Values{"true","false"}] string orphanWorkerProcess;
 	[write] string orphanActionExe;
