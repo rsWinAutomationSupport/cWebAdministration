@@ -68,7 +68,7 @@ function Get-TargetResource
 
         # Add all Website properties to the hash table
         $getTargetResourceResult = @{
-    	                                Name = $PoolConfig.add.name; 
+                                        Name = $PoolConfig.add.name; 
                                         Ensure = $ensureResult;
                                         autoStart = $PoolConfig.add.autoStart;
                                         managedRuntimeVersion = $PoolConfig.add.managedRuntimeVersion;
@@ -100,7 +100,7 @@ function Get-TargetResource
                                         restartPrivateMemoryLimit = $PoolConfig.add.recycling.periodicRestart.privateMemory;
                                         restartRequestsLimit = $PoolConfig.add.recycling.periodicRestart.requests;
                                         restartTimeLimit = $PoolConfig.add.recycling.periodicRestart.time;
-										restartSchedule = $PoolConfig.add.recycling.periodicRestart.schedule;
+                                        restartSchedule = $PoolConfig.add.recycling.periodicRestart.schedule;
                                         loadBalancerCapabilities = $PoolConfig.add.failure.loadBalancerCapabilities;
                                         orphanWorkerProcess = $PoolConfig.add.failure.orphanWorkerProcess;
                                         orphanActionExe = $PoolConfig.add.failure.orphanActionExe;
@@ -215,9 +215,9 @@ function Set-TargetResource
         [string]$restartRequestsLimit = "0",
 
         [string]$restartTimeLimit = "1.05:00:00",
-		
-		#Format 00:00:00 24hr clock
-		[string[]]$restartSchedule = @(""),
+        
+        #Format 00:00:00 24hr clock
+        [string[]]$restartSchedule = @(""),
 
         [ValidateSet("HttpLevel","TcpLevel")]
         [string]$loadBalancerCapabilities = "HttpLevel",
@@ -461,18 +461,18 @@ function Set-TargetResource
                 & $env:SystemRoot\system32\inetsrv\appcmd.exe set apppool $Name /recycling.periodicRestart.time:$restartTimeLimit
             }
 
-			#update restartSchedule if required
-			#clear current schedule
-			foreach($schTime in $PoolConfig.add.recycling.periodicRestart.schedule.add.value)
-			{
-				& $env:SystemRoot\system32\inetsrv\appcmd.exe set apppool $Name "/-recycling.periodicRestart.schedule.[value='$schTime']"
-			}
-			#add desired schedule
-			foreach($time in $restartSchedule)
-			{
-				& $env:SystemRoot\system32\inetsrv\appcmd.exe set apppool $Name "/+recycling.periodicRestart.schedule.[value='$time']"				
-			}
-			
+            #update restartSchedule if required
+            #clear current schedule
+            foreach($schTime in $PoolConfig.add.recycling.periodicRestart.schedule.add.value)
+            {
+                & $env:SystemRoot\system32\inetsrv\appcmd.exe set apppool $Name "/-recycling.periodicRestart.schedule.[value='$schTime']"
+            }
+            #add desired schedule
+            foreach($time in $restartSchedule)
+            {
+                & $env:SystemRoot\system32\inetsrv\appcmd.exe set apppool $Name "/+recycling.periodicRestart.schedule.[value='$time']"                
+            }
+            
             #update loadBalancerCapabilities if required
             if($PoolConfig.add.failure.loadBalancerCapabilities -ne $loadBalancerCapabilities){
                 $UpdateNotRequired = $false
@@ -575,7 +575,7 @@ function Set-TargetResource
             try
             {
                 New-WebAppPool $Name
-		        Wait-Event -Timeout 5
+                Wait-Event -Timeout 5
                 Stop-WebAppPool $Name
             
                 #Configure settings that have been passed
@@ -634,11 +634,11 @@ function Set-TargetResource
                 & $env:SystemRoot\system32\inetsrv\appcmd.exe set apppool $Name /recycling.periodicRestart.requests:$restartRequestsLimit
 
                 & $env:SystemRoot\system32\inetsrv\appcmd.exe set apppool $Name /recycling.periodicRestart.time:$restartTimeLimit
-				
-				foreach($time in $restartSchedule)
-				{
-					& $env:SystemRoot\system32\inetsrv\appcmd.exe set apppool $Name "/+recycling.periodicRestart.schedule.[value='$time']"				
-				}
+                
+                foreach($time in $restartSchedule)
+                {
+                    & $env:SystemRoot\system32\inetsrv\appcmd.exe set apppool $Name "/+recycling.periodicRestart.schedule.[value='$time']"                
+                }
 
                 & $env:SystemRoot\system32\inetsrv\appcmd.exe set apppool $Name /failure.loadBalancerCapabilities:$loadBalancerCapabilities
 
@@ -827,9 +827,9 @@ function Test-TargetResource
         [string]$restartRequestsLimit = "0",
 
         [string]$restartTimeLimit = "1.05:00:00",
-		
-		#Format 00:00:00 24hr clock
-		[string[]]$restartSchedule = @(""),
+        
+        #Format 00:00:00 24hr clock
+        [string[]]$restartSchedule = @(""),
 
         [ValidateSet("HttpLevel","TcpLevel")]
         [string]$loadBalancerCapabilities = "HttpLevel",
@@ -911,35 +911,35 @@ function Test-TargetResource
                 Write-Verbose("managedRuntimeVersion of AppPool $Name does not match the desired state.");
                 break
             }
-			
+            
             #Check managedPipelineMode 
             if($PoolConfig.add.managedPipelineMode -ne $managedPipelineMode){
                 $DesiredConfigurationMatch = $false
                 Write-Verbose("managedPipelineMode of AppPool $Name does not match the desired state.");
                 break
             }
-			
+            
             #Check startMode 
             if($PoolConfig.add.startMode -ne $startMode){
                 $DesiredConfigurationMatch = $false
                 Write-Verbose("startMode of AppPool $Name does not match the desired state.");
                 break
             }
-			
+            
             #Check identityType 
             if($PoolConfig.add.processModel.identityType -ne $identityType){
                 $DesiredConfigurationMatch = $false
                 Write-Verbose("identityType of AppPool $Name does not match the desired state.");
                 break
             }
-			
+            
             #Check userName 
             if($PoolConfig.add.processModel.userName -ne $userName){
                 $DesiredConfigurationMatch = $false
                 Write-Verbose("userName of AppPool $Name does not match the desired state.");
                 break
             }
-			
+            
             #Check password 
             if($identityType -eq "SpecificUser" -and $Password){
                 $clearTextPassword = $Password.GetNetworkCredential().Password
@@ -949,7 +949,7 @@ function Test-TargetResource
                     break
                 }
             }
-			
+            
             #Check loadUserProfile 
             if($PoolConfig.add.processModel.loadUserProfile -ne $loadUserProfile){
                 $DesiredConfigurationMatch = $false
@@ -1110,45 +1110,45 @@ function Test-TargetResource
                 Write-Verbose("restartTimeLimit of AppPool $Name does not match the desired state.");
                 break
             }
-			
-			#Check restartSchedule
-			#TODO - there is probably a better way to do this test
-			#First check to see if desired schedule times are currently in the schedule			
-			foreach($time in $restartSchedule)
-			{
-				$schedExist = $false
-				foreach($schTime in $PoolConfig.add.recycling.periodicRestart.schedule.add.value)
-				{
-					if($schTime -eq $time)
-					{
-						$schedExist = $true
-						break
-					}
-				}
-				if($schedExist -eq $false){
-					$DesiredConfigurationMatch = $false
-					Write-Verbose("restartSchedule of AppPool $Name does not match the desired state.");
-					break
-				}
-			}
-			#Then check to see if there are currently scheduled times that aren't in the desired schedule
-			foreach($schTime in $PoolConfig.add.recycling.periodicRestart.schedule.add.value)
-			{
-				$schedExist = $false
-				foreach($time in $restartSchedule)
-				{
-					if($schTime -eq $time)
-					{
-						$schedExist = $true
-						break
-					}
-				}
-				if($schedExist -eq $false){
-					$DesiredConfigurationMatch = $false
-					Write-Verbose("restartSchedule of AppPool $Name does not match the desired state.");
-					break
-				}
-			}
+            
+            #Check restartSchedule
+            #TODO - there is probably a better way to do this test
+            #First check to see if desired schedule times are currently in the schedule            
+            foreach($time in $restartSchedule)
+            {
+                $schedExist = $false
+                foreach($schTime in $PoolConfig.add.recycling.periodicRestart.schedule.add.value)
+                {
+                    if($schTime -eq $time)
+                    {
+                        $schedExist = $true
+                        break
+                    }
+                }
+                if($schedExist -eq $false){
+                    $DesiredConfigurationMatch = $false
+                    Write-Verbose("restartSchedule of AppPool $Name does not match the desired state.");
+                    break
+                }
+            }
+            #Then check to see if there are currently scheduled times that aren't in the desired schedule
+            foreach($schTime in $PoolConfig.add.recycling.periodicRestart.schedule.add.value)
+            {
+                $schedExist = $false
+                foreach($time in $restartSchedule)
+                {
+                    if($schTime -eq $time)
+                    {
+                        $schedExist = $true
+                        break
+                    }
+                }
+                if($schedExist -eq $false){
+                    $DesiredConfigurationMatch = $false
+                    Write-Verbose("restartSchedule of AppPool $Name does not match the desired state.");
+                    break
+                }
+            }
 
             #Check loadBalancerCapabilities 
             if($PoolConfig.add.failure.loadBalancerCapabilities -ne $loadBalancerCapabilities){
