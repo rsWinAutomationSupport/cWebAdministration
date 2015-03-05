@@ -1112,7 +1112,12 @@ function Test-TargetResource
             }
 
             #Check restartSchedule
-            if((Compare-Object $restartSchedule $PoolConfig.add.recycling.periodicRestart.schedule.add.value) -ne $null){
+            if(($PoolConfig.add.recycling.periodicRestart.schedule.add.value -ne $null) -and ((Compare-Object $restartSchedule $PoolConfig.add.recycling.periodicRestart.schedule.add.value) -ne $null)){
+                $DesiredConfigurationMatch = $false
+                Write-Verbose("restartTimeLimit of AppPool $Name does not match the desired state.");
+                break
+            }
+            if(($PoolConfig.add.recycling.periodicRestart.schedule.add.value -eq $null) -and ($restartSchedule -ne $null)){
                 $DesiredConfigurationMatch = $false
                 Write-Verbose("restartTimeLimit of AppPool $Name does not match the desired state.");
                 break
