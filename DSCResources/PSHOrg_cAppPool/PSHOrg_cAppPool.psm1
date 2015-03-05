@@ -216,7 +216,7 @@ function Set-TargetResource
 
         [string]$restartTimeLimit = "1.05:00:00",
         
-        #Format 00:00:00 24hr clock
+        #Format 00:00:00 24hr clock and must have 00 for seconds
         [string[]]$restartSchedule = @(""),
 
         [ValidateSet("HttpLevel","TcpLevel")]
@@ -828,7 +828,7 @@ function Test-TargetResource
 
         [string]$restartTimeLimit = "1.05:00:00",
         
-        #Format 00:00:00 24hr clock
+        #Format 00:00:00 24hr clock and must have 00 for seconds
         [string[]]$restartSchedule = @(""),
 
         [ValidateSet("HttpLevel","TcpLevel")]
@@ -1110,44 +1110,12 @@ function Test-TargetResource
                 Write-Verbose("restartTimeLimit of AppPool $Name does not match the desired state.");
                 break
             }
-            
+
             #Check restartSchedule
-            #TODO - there is probably a better way to do this test
-            #First check to see if desired schedule times are currently in the schedule            
-            foreach($time in $restartSchedule)
-            {
-                $schedExist = $false
-                foreach($schTime in $PoolConfig.add.recycling.periodicRestart.schedule.add.value)
-                {
-                    if($schTime -eq $time)
-                    {
-                        $schedExist = $true
-                        break
-                    }
-                }
-                if($schedExist -eq $false){
-                    $DesiredConfigurationMatch = $false
-                    Write-Verbose("restartSchedule of AppPool $Name does not match the desired state.");
-                    break
-                }
-            }
-            #Then check to see if there are currently scheduled times that aren't in the desired schedule
-            foreach($schTime in $PoolConfig.add.recycling.periodicRestart.schedule.add.value)
-            {
-                $schedExist = $false
-                foreach($time in $restartSchedule)
-                {
-                    if($schTime -eq $time)
-                    {
-                        $schedExist = $true
-                        break
-                    }
-                }
-                if($schedExist -eq $false){
-                    $DesiredConfigurationMatch = $false
-                    Write-Verbose("restartSchedule of AppPool $Name does not match the desired state.");
-                    break
-                }
+            if((Compare-Object $restartSchedule $PoolConfig.add.recycling.periodicRestart.schedule.add.value) -ne $null){
+                $DesiredConfigurationMatch = $false
+                Write-Verbose("restartTimeLimit of AppPool $Name does not match the desired state.");
+                break
             }
 
             #Check loadBalancerCapabilities 
