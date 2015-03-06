@@ -270,7 +270,40 @@ function Set-TargetResource
         {
             Throw "Please ensure that WebAdministration module is installed."
         }
+
         $AppPool = & $env:SystemRoot\system32\inetsrv\appcmd.exe list apppool $Name
+
+        if($AppPool -eq $null) #AppPool doesn't exist so create a new one
+        {
+            try
+            {
+                New-WebAppPool $Name
+                Wait-Event -Timeout 5
+                Stop-WebAppPool $Name
+            
+                Write-Verbose("successfully created AppPool $Name")
+                
+                #Start site if required
+                if($autoStart -eq "true")
+                {
+                    Start-WebAppPool $Name
+                }
+
+                Write-Verbose("successfully started AppPool $Name")
+
+                $AppPool = & $env:SystemRoot\system32\inetsrv\appcmd.exe list apppool $Name
+            }
+            catch
+            {
+                $errorId = "AppPoolCreationFailure"; 
+                $errorCategory = [System.Management.Automation.ErrorCategory]::InvalidOperation;
+                $errorMessage = $($LocalizedData.FeatureCreationFailureError) -f ${Name} ;
+                $exception = New-Object System.InvalidOperationException $errorMessage ;
+                $errorRecord = New-Object System.Management.Automation.ErrorRecord $exception, $errorId, $errorCategory, $null
+
+                $PSCmdlet.ThrowTerminatingError($errorRecord);
+            }
+        }    
 
         if($AppPool -ne $null)
         {
@@ -565,142 +598,11 @@ function Set-TargetResource
             
             if($UpdateNotRequired)
             {
-                Write-Verbose("AppPool $Name already exists and properties do not need to be udpated.");
+                Write-Verbose("AppPool $Name already exists and properties do not need to be updated.");
             }
             
-
         }
-        else #AppPool doesn't exist so create new one
-        {
-            try
-            {
-                New-WebAppPool $Name
-                Wait-Event -Timeout 5
-                Stop-WebAppPool $Name
-            
-                #Configure settings that have been passed
-                & $env:SystemRoot\system32\inetsrv\appcmd.exe set apppool $Name /autoStart:$autoStart
-
-                & $env:SystemRoot\system32\inetsrv\appcmd.exe set apppool $Name /managedRuntimeVersion:$managedRuntimeVersion
-            
-                & $env:SystemRoot\system32\inetsrv\appcmd.exe set apppool $Name /managedPipelineMode:$managedPipelineMode
-
-                & $env:SystemRoot\system32\inetsrv\appcmd.exe set apppool $Name /startMode:$startMode
-            
-                & $env:SystemRoot\system32\inetsrv\appcmd.exe set apppool $Name /processModel.identityType:$identityType
-            
-                & $env:SystemRoot\system32\inetsrv\appcmd.exe set apppool $Name /processModel.userName:$userName
-
-                & $env:SystemRoot\system32\inetsrv\appcmd.exe set apppool $Name /queueLength:$queueLength
-
-                & $env:SystemRoot\system32\inetsrv\appcmd.exe set apppool $Name /enable32BitAppOnWin64:$enable32BitAppOnWin64
-
-                & $env:SystemRoot\system32\inetsrv\appcmd.exe set apppool $Name /managedRuntimeLoader:$managedRuntimeLoader
-
-                & $env:SystemRoot\system32\inetsrv\appcmd.exe set apppool $Name /enableConfigurationOverride:$enableConfigurationOverride
-
-                & $env:SystemRoot\system32\inetsrv\appcmd.exe set apppool $Name /CLRConfigFile:$CLRConfigFile
-
-                & $env:SystemRoot\system32\inetsrv\appcmd.exe set apppool $Name /passAnonymousToken:$passAnonymousToken
-
-                & $env:SystemRoot\system32\inetsrv\appcmd.exe set apppool $Name /processModel.logonType:$logonType
-
-                & $env:SystemRoot\system32\inetsrv\appcmd.exe set apppool $Name /processModel.manualGroupMembership:$manualGroupMembership
-
-                & $env:SystemRoot\system32\inetsrv\appcmd.exe set apppool $Name /processModel.idleTimeout:$idleTimeout
-
-                & $env:SystemRoot\system32\inetsrv\appcmd.exe set apppool $Name /processModel.maxProcesses:$maxProcesses
-
-                & $env:SystemRoot\system32\inetsrv\appcmd.exe set apppool $Name /processModel.shutdownTimeLimit:$shutdownTimeLimit
-
-                & $env:SystemRoot\system32\inetsrv\appcmd.exe set apppool $Name /processModel.startupTimeLimit:$startupTimeLimit
-
-                & $env:SystemRoot\system32\inetsrv\appcmd.exe set apppool $Name /processModel.pingingEnabled:$pingingEnabled
-
-                & $env:SystemRoot\system32\inetsrv\appcmd.exe set apppool $Name /processModel.pingInterval:$pingInterval
-
-                & $env:SystemRoot\system32\inetsrv\appcmd.exe set apppool $Name /processModel.pingResponseTime:$pingResponseTime
-
-                & $env:SystemRoot\system32\inetsrv\appcmd.exe set apppool $Name /recycling.disallowOverlappingRotation:$disallowOverlappingRotation
-
-                & $env:SystemRoot\system32\inetsrv\appcmd.exe set apppool $Name /recycling.disallowRotationOnConfigChange:$disallowRotationOnConfigChange
-
-                & $env:SystemRoot\system32\inetsrv\appcmd.exe set apppool $Name /recycling.logEventOnRecycle:$logEventOnRecycle
-
-                & $env:SystemRoot\system32\inetsrv\appcmd.exe set apppool $Name /recycling.periodicRestart.memory:$restartMemoryLimit
-
-                & $env:SystemRoot\system32\inetsrv\appcmd.exe set apppool $Name /recycling.periodicRestart.privateMemory:$restartPrivateMemoryLimit
-
-                & $env:SystemRoot\system32\inetsrv\appcmd.exe set apppool $Name /recycling.periodicRestart.requests:$restartRequestsLimit
-
-                & $env:SystemRoot\system32\inetsrv\appcmd.exe set apppool $Name /recycling.periodicRestart.time:$restartTimeLimit
-                
-                foreach($time in $restartSchedule)
-                {
-                    & $env:SystemRoot\system32\inetsrv\appcmd.exe set apppool $Name "/+recycling.periodicRestart.schedule.[value='$time']"                
-                }
-
-                & $env:SystemRoot\system32\inetsrv\appcmd.exe set apppool $Name /failure.loadBalancerCapabilities:$loadBalancerCapabilities
-
-                & $env:SystemRoot\system32\inetsrv\appcmd.exe set apppool $Name /failure.orphanWorkerProcess:$orphanWorkerProcess
-
-                & $env:SystemRoot\system32\inetsrv\appcmd.exe set apppool $Name /failure.orphanActionExe:$orphanActionExe
-
-                & $env:SystemRoot\system32\inetsrv\appcmd.exe set apppool $Name /failure.orphanActionParams:$orphanActionParams
-
-                & $env:SystemRoot\system32\inetsrv\appcmd.exe set apppool $Name /failure.rapidFailProtection:$rapidFailProtection
-
-                & $env:SystemRoot\system32\inetsrv\appcmd.exe set apppool $Name /failure.rapidFailProtectionInterval:$rapidFailProtectionInterval
-
-                & $env:SystemRoot\system32\inetsrv\appcmd.exe set apppool $Name /failure.rapidFailProtectionMaxCrashes:$rapidFailProtectionMaxCrashes
-
-                & $env:SystemRoot\system32\inetsrv\appcmd.exe set apppool $Name /failure.autoShutdownExe:$autoShutdownExe
-
-                & $env:SystemRoot\system32\inetsrv\appcmd.exe set apppool $Name /failure.autoShutdownParams:$autoShutdownParams
-
-                & $env:SystemRoot\system32\inetsrv\appcmd.exe set apppool $Name /cpu.limit:$cpuLimit
-
-                & $env:SystemRoot\system32\inetsrv\appcmd.exe set apppool $Name /cpu.action:$cpuAction
-
-                & $env:SystemRoot\system32\inetsrv\appcmd.exe set apppool $Name /cpu.resetInterval:$cpuResetInterval
-
-                & $env:SystemRoot\system32\inetsrv\appcmd.exe set apppool $Name /cpu.smpAffinitized:$cpuSmpAffinitized
-
-                & $env:SystemRoot\system32\inetsrv\appcmd.exe set apppool $Name /cpu.smpProcessorAffinityMask:$cpuSmpProcessorAffinityMask
-
-                & $env:SystemRoot\system32\inetsrv\appcmd.exe set apppool $Name /cpu.smpProcessorAffinityMask2:$cpuSmpProcessorAffinityMask2
-
-
-          
-            #set password if required
-                if($identityType -eq "SpecificUser" -and $Password){
-                    $clearTextPassword = $Password.GetNetworkCredential().Password
-                    & $env:SystemRoot\system32\inetsrv\appcmd.exe set apppool $Name /processModel.password:$clearTextPassword
-                }
-
-                & $env:SystemRoot\system32\inetsrv\appcmd.exe set apppool $Name /processModel.loadUserProfile:$loadUserProfile
-            
-                Write-Verbose("successfully created AppPool $Name")
-                
-                #Start site if required
-                if($autoStart -eq "true")
-                {
-                    Start-WebAppPool $Name
-                }
-
-                Write-Verbose("successfully started AppPool $Name")
-            }
-            catch
-            {
-                $errorId = "AppPoolCreationFailure"; 
-                $errorCategory = [System.Management.Automation.ErrorCategory]::InvalidOperation;
-                $errorMessage = $($LocalizedData.FeatureCreationFailureError) -f ${Name} ;
-                $exception = New-Object System.InvalidOperationException $errorMessage ;
-                $errorRecord = New-Object System.Management.Automation.ErrorRecord $exception, $errorId, $errorCategory, $null
-
-                $PSCmdlet.ThrowTerminatingError($errorRecord);
-            }
-        }    
+ 
     }
     else #Ensure is set to "Absent" so remove website 
     { 
@@ -1236,5 +1138,3 @@ function Test-TargetResource
 
     return $DesiredConfigurationMatch
 }
-
-
