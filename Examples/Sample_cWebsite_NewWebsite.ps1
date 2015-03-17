@@ -61,6 +61,19 @@ configuration Sample_cWebsite_NewWebsite
             DependsOn       = "[WindowsFeature]AspNet45"
         }       
 
+        # Create the new AppPool
+        cAppPool NewAppPool
+        {
+            Name = $AppPoolName
+            Ensure = "Present"
+            autoStart = "true"  
+            managedRuntimeVersion = "v4.0"
+            managedPipelineMode = "Integrated"
+            startMode = "AlwaysRunning"
+            identityType = "ApplicationPoolIdentity"
+            restartSchedule = @("18:30:00","05:00:00")
+        }
+        
         # Create the new Website
         cWebsite NewWebsite
         {
@@ -68,8 +81,64 @@ configuration Sample_cWebsite_NewWebsite
             Name            = $WebSiteName
             State           = "Started"
             PhysicalPath    = $DestinationPath
-            DependsOn       = "[File]WebContent"
+            BindingInfo  = @(
+                PSHOrg_cWebBindingInformation 
+                {
+                    Protocol = 'HTTP'
+                    Port     = 80
+                    HostName = '*'
+                }
+                PSHOrg_cWebBindingInformation 
+                {
+                    Protocol = 'HTTPS'
+                    Port     = 433
+                    HostName = '*'
+                }
+            )
+            webConfigProp = @(
+                PSHOrg_cWebConfigProp
+                {
+                    Filter = 'system.webServer/urlCompression'
+                    PSPath = 'MACHINE/WEBROOT/APPHOST/DemoSite'
+                    Name = 'doStaticCompression'
+                    Value = 'true'
+                }
+                PSHOrg_cWebConfigProp
+                {
+                    Filter = 'system.webServer/security/access'
+                    PSPath = 'MACHINE/WEBROOT/APPHOST'
+                    Location = 'DemoSite'
+                    Name = 'sslFlags'
+                    Value = 'Ssl,SslNegotiateCert,SslRequireCert'
+                }
+                PSHOrg_cWebConfigProp
+                {
+                    Filter = 'system.webServer/cgi'
+                    PSPath = 'MACHINE/WEBROOT/APPHOST'
+                    Location = 'DemoSite'
+                    Name = 'timeout'
+                    Value = '00:20:00'
+                }
+                PSHOrg_cWebConfigProp
+                {
+                    Filter = 'system.web/customErrors'
+                    PSPath = 'MACHINE/WEBROOT/APPHOST/DemoSite'
+                    Name = 'mode'
+                    Value = 'Off'
+                }
+                PSHOrg_cWebConfigProp
+                {
+                    Filter = 'system.net/mailSettings/smtp/network'
+                    PSPath = 'MACHINE/WEBROOT/APPHOST/DemoSite'
+                    Name = 'host'
+                    Value = 'TestSMTPHost'
+                }
+            )
+            ApplicationPool = $AppPoolName
+            DependsOn = @("[WindowsFeature]IIS","[File]WebContent","[cAppPool]NewAppPool")           
         }
+        
+
     }
 }
 
