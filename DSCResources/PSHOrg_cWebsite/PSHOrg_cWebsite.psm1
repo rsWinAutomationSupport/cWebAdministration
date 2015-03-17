@@ -91,7 +91,7 @@ function Get-TargetResource
 }
 
 
-# The Set-TargetResource cmdlet is used to create, delete or configuure a website on the target machine. 
+# The Set-TargetResource cmdlet is used to create, delete or configure a website on the target machine. 
 function Set-TargetResource 
 {
     [CmdletBinding(SupportsShouldProcess=$true)]
@@ -171,50 +171,64 @@ function Set-TargetResource
                     {
                         $PSPath = $prop.CimInstanceProperties["PSPath"].Value
                     }
-                    $propObject = Get-WebConfigurationProperty -Filter $prop.CimInstanceProperties["Filter"].Value -PSPath $PSPath -Name $prop.CimInstanceProperties["Name"].Value | Select Value
                     
-                    #get-webconfigurationproperty returns values differently depending on the property so we have to check if .Value is null or not and proceed accordingly
-                    if($propObject[0].Value)
+                    Try
                     {
-                        if($propObject[0].Value.toString() -ne $prop.CimInstanceProperties["Value"].Value.toString())#produces inconsistent results without toString
+                        $propObject = Get-WebConfigurationProperty -Filter $prop.CimInstanceProperties["Filter"].Value -PSPath $PSPath -Name $prop.CimInstanceProperties["Name"].Value | Select Value
+                    }
+                    Catch [System.IO.FileNotFoundException]
+                    {
+                        Write-Warning("Exception: $($_.Exception.Message)")
+                    }
+                        
+                    if($propObject -ne $null)
+                    {
+                        #get-webconfigurationproperty returns values differently depending on the property so we have to check if .Value is null or not and proceed accordingly
+                        if($propObject[0].Value)
                         {
-                            $UpdateNotRequired = $false
-                            
-                            #use the location parameter if it is specified
-                            if($prop.CimInstanceProperties["Location"].Value)
+                            if($propObject[0].Value.toString() -ne $prop.CimInstanceProperties["Value"].Value.toString())#produces inconsistent results without toString
                             {
-                                Set-WebConfigurationProperty -filter $prop.CimInstanceProperties["Filter"].Value -pspath $prop.CimInstanceProperties["PSPath"].Value -location $prop.CimInstanceProperties["Location"].Value -name $prop.CimInstanceProperties["Name"].Value -value $prop.CimInstanceProperties["Value"].Value
+                                $UpdateNotRequired = $false
+                                
+                                #use the location parameter if it is specified
+                                if($prop.CimInstanceProperties["Location"].Value)
+                                {
+                                    Set-WebConfigurationProperty -filter $prop.CimInstanceProperties["Filter"].Value -pspath $prop.CimInstanceProperties["PSPath"].Value -location $prop.CimInstanceProperties["Location"].Value -name $prop.CimInstanceProperties["Name"].Value -value $prop.CimInstanceProperties["Value"].Value
+                                }
+                                else
+                                {
+                                    Set-WebConfigurationProperty -filter $prop.CimInstanceProperties["Filter"].Value -pspath $prop.CimInstanceProperties["PSPath"].Value -name $prop.CimInstanceProperties["Name"].Value -value $prop.CimInstanceProperties["Value"].Value
+                                }
+                                
+                                $propName = $prop.CimInstanceProperties["Name"].Value
+                                Write-Verbose("$propName for website $Name have been updated.")
                             }
-                            else
+                        }
+                        else
+                        {
+                            if($propObject[0].toString() -ne $prop.CimInstanceProperties["Value"].Value.toString())#produces inconsistent results without toString
                             {
-                                Set-WebConfigurationProperty -filter $prop.CimInstanceProperties["Filter"].Value -pspath $prop.CimInstanceProperties["PSPath"].Value -name $prop.CimInstanceProperties["Name"].Value -value $prop.CimInstanceProperties["Value"].Value
+                                $UpdateNotRequired = $false
+                                
+                                #use the location parameter if it is specified
+                                if($prop.CimInstanceProperties["Location"].Value)
+                                {
+                                    Set-WebConfigurationProperty -filter $prop.CimInstanceProperties["Filter"].Value -pspath $prop.CimInstanceProperties["PSPath"].Value -location $prop.CimInstanceProperties["Location"].Value -name $prop.CimInstanceProperties["Name"].Value -value $prop.CimInstanceProperties["Value"].Value
+                                }
+                                else
+                                {
+                                    Set-WebConfigurationProperty -filter $prop.CimInstanceProperties["Filter"].Value -pspath $prop.CimInstanceProperties["PSPath"].Value -name $prop.CimInstanceProperties["Name"].Value -value $prop.CimInstanceProperties["Value"].Value
+                                }
+                                
+                                $propName = $prop.CimInstanceProperties["Name"].Value
+                                Write-Verbose("$propName for website $Name have been updated.")
                             }
-                            
-                            $propName = $prop.CimInstanceProperties["Name"].Value
-                            Write-Verbose("$propName for website $Name have been updated.")
                         }
                     }
                     else
                     {
-                        if($propObject[0].toString() -ne $prop.CimInstanceProperties["Value"].Value.toString())#produces inconsistent results without toString
-                        {
-                            $UpdateNotRequired = $false
-                            
-                            #use the location parameter if it is specified
-                            if($prop.CimInstanceProperties["Location"].Value)
-                            {
-                                Set-WebConfigurationProperty -filter $prop.CimInstanceProperties["Filter"].Value -pspath $prop.CimInstanceProperties["PSPath"].Value -location $prop.CimInstanceProperties["Location"].Value -name $prop.CimInstanceProperties["Name"].Value -value $prop.CimInstanceProperties["Value"].Value
-                            }
-                            else
-                            {
-                                Set-WebConfigurationProperty -filter $prop.CimInstanceProperties["Filter"].Value -pspath $prop.CimInstanceProperties["PSPath"].Value -name $prop.CimInstanceProperties["Name"].Value -value $prop.CimInstanceProperties["Value"].Value
-                            }
-                            
-                            $propName = $prop.CimInstanceProperties["Name"].Value
-                            Write-Verbose("$propName for website $Name have been updated.")
-                        }
+                        Write-Warning("Could not find $PSPath " + $prop.CimInstanceProperties["Filter"].Value + " " + $prop.CimInstanceProperties["Name"].Value)
                     }
-                    
                 
                 }
             }
@@ -458,6 +472,7 @@ function Test-TargetResource
             foreach ($prop in $webConfigProp)
             {
                 #if location has a value we need to combine it with pspath to do get-webconfigurationproperty
+                
                 if($prop.CimInstanceProperties["Location"].Value)
                 {
                     $PSPath = $prop.CimInstanceProperties["PSPath"].Value + "/" + $prop.CimInstanceProperties["Location"].Value
@@ -466,29 +481,44 @@ function Test-TargetResource
                 {
                     $PSPath = $prop.CimInstanceProperties["PSPath"].Value
                 }
-                $propObject = Get-WebConfigurationProperty -Filter $prop.CimInstanceProperties["Filter"].Value -PSPath $PSPath -Name $prop.CimInstanceProperties["Name"].Value
                 
-                #get-webconfigurationproperty returns values differently depending on the property so we have to check if .Value is null or not and proceed accordingly
-                if ($propObject[0].Value)
+                Try
                 {
-                    if($propObject[0].Value.toString() -ne $prop.CimInstanceProperties["Value"].Value.toString())#produces inconsistent results without toString
+                    $propObject = Get-WebConfigurationProperty -Filter $prop.CimInstanceProperties["Filter"].Value -PSPath $PSPath -Name $prop.CimInstanceProperties["Name"].Value
+                }
+                Catch [System.IO.FileNotFoundException]
+                {
+                    Write-Warning("Exception: $($_.Exception.Message)")
+                }
+                
+                if($propObject -ne $null)
+                {
+                    #get-webconfigurationproperty returns values differently depending on the property so we have to check if .Value is null or not and proceed accordingly
+                    if ($propObject[0].Value)
                     {
-                        $DesiredConfigurationMatch = $false
-                        $propName = $prop.CimInstanceProperties["Name"].Value
-                        Write-Verbose("$propName for Website $Name does not match the desired state.");
-                        break
+                        if($propObject[0].Value.toString() -ne $prop.CimInstanceProperties["Value"].Value.toString())#produces inconsistent results without toString
+                        {
+                            $DesiredConfigurationMatch = $false
+                            $propName = $prop.CimInstanceProperties["Name"].Value
+                            Write-Verbose("$propName for Website $Name does not match the desired state.");
+                            break
+                        }
+                    }
+                    else
+                    {                    
+                        if($propObject -ne $prop.CimInstanceProperties["Value"].Value.toString())#produces inconsistent results without toString
+                        {
+                            $DesiredConfigurationMatch = $false
+                            $propName = $prop.CimInstanceProperties["Name"].Value
+                            Write-Verbose("$propName for Website $Name does not match the desired state.");
+                            break
+                        }
                     }
                 }
                 else
-                {                    
-                    if($propObject -ne $prop.CimInstanceProperties["Value"].Value.toString())#produces inconsistent results without toString
-                    {
-                        $DesiredConfigurationMatch = $false
-                        $propName = $prop.CimInstanceProperties["Name"].Value
-                        Write-Verbose("$propName for Website $Name does not match the desired state.");
-                        break
-                    }
-                }    
+                {
+                    Write-Warning("Could not find $PSPath " + $prop.CimInstanceProperties["Filter"].Value + " " + $prop.CimInstanceProperties["Name"].Value)
+                }
             }
             
                 #Check Binding properties
