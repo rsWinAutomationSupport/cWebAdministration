@@ -21,15 +21,16 @@ function Get-AppPool
         [switch]$Config
     )
 
+    $result = $null
     if ($Config)
     {
-        & $env:SystemRoot\system32\inetsrv\appcmd.exe list apppool $Name /config:*
+        [xml]$result = & $env:SystemRoot\system32\inetsrv\appcmd.exe list apppool $Name /config:*
     }
     else
     {
-        & $env:SystemRoot\system32\inetsrv\appcmd.exe list apppool $Name
+        [string[]]$result = & $env:SystemRoot\system32\inetsrv\appcmd.exe list apppool $Name
     }
-
+    return $result
 }
 
 # The Get-TargetResource cmdlet is used to fetch the status of role or AppPool on the target machine.
@@ -62,7 +63,6 @@ function Get-TargetResource
         {
             $ensureResult = "Present"
 
-            [xml] $PoolConfig
             $PoolConfig = Get-AppPool -Name $Name -config
             if($PoolConfig.add.processModel.userName){
                 $AppPoolPassword = $PoolConfig.add.processModel.password | ConvertTo-SecureString -AsPlainText -Force
@@ -331,7 +331,7 @@ function Set-TargetResource
 
             #get configuration of AppPool
             #[xml] $PoolConfig
-            [xml]$PoolConfig = Get-AppPool -Name $Name -Config
+            $PoolConfig = Get-AppPool -Name $Name -Config
 
             #Update autoStart if required
             if($PoolConfig.add.autoStart -ne $autoStart){
@@ -627,6 +627,7 @@ function Set-TargetResource
         try
         {
             $AppPool = Get-AppPool -Name $Name
+
             if($AppPool -ne $null)
             {
                 Stop-WebAppPool $Name
@@ -798,10 +799,9 @@ function Test-TargetResource
     }
 
     $AppPool = Get-AppPool -Name $Name
+
     if($AppPool){
-        #get configuration of AppPool
-        #[xml] $PoolConfig
-        [xml]$PoolConfig = Get-AppPool -Name $Name -Config
+        $PoolConfig = Get-AppPool -Name $Name -Config
     }
     $Stop = $true
 
@@ -1153,6 +1153,7 @@ function Test-TargetResource
         $Stop = $false
     }
     While($Stop)
+
 
     return $DesiredConfigurationMatch
 }
