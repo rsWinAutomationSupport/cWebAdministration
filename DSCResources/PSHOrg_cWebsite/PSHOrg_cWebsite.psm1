@@ -14,6 +14,9 @@ WebsiteBindingInputInvalidationError=Desired website bindings not valid for webs
 WebsiteCompareFailureError=Failure to successfully compare properties for website "{0}".
 WebBindingCertifcateError=Failure to add certificate to web binding.
 WebsiteStateFailureError=Failure to successfully set the state of the website {0}.
+WebsiteBindingMissingCertificateInformation=HTTPS binding on port {0} for website "{1}" must have CertificateThumbprint and CertificateStoreName properties.
+WebsiteBindingCertificateNotInstalled=Certificate {0} was not found for HTTPS binding on port {1} for website "{2}".
+WebsiteBindingCertificateMissingPrivateKey=No private key found for certificate {0}, for HTTPS binding on port {1} for website "{2}".
 '@
 }
 
@@ -619,6 +622,47 @@ function ValidateWebsiteBindings
             $errorRecord = New-Object System.Management.Automation.ErrorRecord $exception, $errorId, $errorCategory, $null
 
             $PSCmdlet.ThrowTerminatingError($errorRecord);
+        }
+
+        # Ensure valid SSL certificate information for https bindings
+
+        if ($binding.Protocol -eq 'https')
+        {
+            if (-not $binding.CertificateThumbprint -or -not $binding.CertificateStoreName)
+            {
+                $errorId       = "WebsiteBindingInputInvalidation";
+                $errorCategory = [System.Management.Automation.ErrorCategory]::InvalidArgument
+                $errorMessage  = $LocalizedData.WebsiteBindingMissingCertificateInformation -f $binding.Port, $Name
+                $exception     = New-Object System.ArgumentException $errorMessage
+                $errorRecord   = New-Object System.Management.Automation.ErrorRecord $exception, $errorId, $errorCategory, $null
+
+                $PSCmdlet.ThrowTerminatingError($errorRecord)
+            }
+
+            $certPath = Join-Path Cert:\LocalMachine "$($binding.CertificateStoreName)\$($binding.CertificateThumbprint)"
+            if (-not (Test-Path -LiteralPath $certPath))
+            {
+                $errorId       = "WebsiteBindingInputInvalidation";
+                $errorCategory = [System.Management.Automation.ErrorCategory]::InvalidArgument
+                $errorMessage  = $LocalizedData.WebsiteBindingCertificateNotInstalled -f $certPath, $binding.Port, $Name
+                $exception     = New-Object System.ArgumentException $errorMessage
+                $errorRecord   = New-Object System.Management.Automation.ErrorRecord $exception, $errorId, $errorCategory, $null
+
+                $PSCmdlet.ThrowTerminatingError($errorRecord)
+            }
+
+            $cert = Get-Item -LiteralPath $certPath -ErrorAction Stop
+
+            if (-not $cert.HasPrivateKey)
+            {
+                $errorId       = "WebsiteBindingInputInvalidation";
+                $errorCategory = [System.Management.Automation.ErrorCategory]::InvalidData
+                $errorMessage  = $LocalizedData.WebsiteBindingCertificateMissingPrivateKey -f $certPath, $binding.Port, $Name
+                $exception     = New-Object System.ArgumentException $errorMessage
+                $errorRecord   = New-Object System.Management.Automation.ErrorRecord $exception, $errorId, $errorCategory, $null
+
+                $PSCmdlet.ThrowTerminatingError($errorRecord)
+            }
         }
     }     
     

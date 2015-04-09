@@ -1,4 +1,4 @@
-[ClassVersion("1.0.0")]
+[ClassVersion("2.0.0")]
 Class PSHOrg_cWebBindingInformation
 {
     [write]UInt16 Port;
@@ -6,7 +6,7 @@ Class PSHOrg_cWebBindingInformation
     [write]String IPAddress;
     [write]String HostName;
     [write]String CertificateThumbprint;
-    [write,ValueMap{"Personal", "WebHosting"},Values{"Personal", "WebHosting"}] string CertificateStoreName;
+    [write,ValueMap{"My", "WebHosting"},Values{"My", "WebHosting"}] string CertificateStoreName;
 };
 
 [ClassVersion("1.0.0")]
