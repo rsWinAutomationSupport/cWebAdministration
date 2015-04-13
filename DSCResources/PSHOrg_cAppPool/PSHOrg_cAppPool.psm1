@@ -349,7 +349,7 @@ function Set-TargetResource
             #update password if required
             if($identityType -eq "SpecificUser" -and $Password){
                 $clearTextPassword = $Password.GetNetworkCredential().Password
-                if($clearTextPassword -eq $PoolConfig.add.processModel.password){
+                if($clearTextPassword -ne $PoolConfig.add.processModel.password){
                     $UpdateNotRequired = $false
                     & $env:SystemRoot\system32\inetsrv\appcmd.exe set apppool $Name /processModel.password:$clearTextPassword
                 }
