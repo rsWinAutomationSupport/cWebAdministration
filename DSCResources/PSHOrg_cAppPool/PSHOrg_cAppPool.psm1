@@ -47,7 +47,7 @@ function Get-TargetResource
             [xml] $PoolConfig
             $PoolConfig = & $env:SystemRoot\system32\inetsrv\appcmd.exe list apppool $Name /config:*
             if($PoolConfig.add.processModel.userName){
-                $AppPoolPassword = $PoolConfig.add.processModel.password | ConvertTo-SecureString
+                $AppPoolPassword = $PoolConfig.add.processModel.password | ConvertTo-SecureString -AsPlainText -Force
                 $AppPoolCred = new-object -typename System.Management.Automation.PSCredential -argumentlist $PoolConfig.add.processModel.userName,$AppPoolPassword
             }
             else{
@@ -349,7 +349,7 @@ function Set-TargetResource
             #update password if required
             if($identityType -eq "SpecificUser" -and $Password){
                 $clearTextPassword = $Password.GetNetworkCredential().Password
-                if($clearTextPassword -ne $PoolConfig.add.processModel.password){
+                if($clearTextPassword -cne $PoolConfig.add.processModel.password){
                     $UpdateNotRequired = $false
                     & $env:SystemRoot\system32\inetsrv\appcmd.exe set apppool $Name /processModel.password:$clearTextPassword
                 }
@@ -845,7 +845,7 @@ function Test-TargetResource
             #Check password 
             if($identityType -eq "SpecificUser" -and $Password){
                 $clearTextPassword = $Password.GetNetworkCredential().Password
-                if($clearTextPassword -eq $PoolConfig.add.processModel.password){
+                if($clearTextPassword -cne $PoolConfig.add.processModel.password){
                     $DesiredConfigurationMatch = $false
                     Write-Verbose("Password of AppPool $Name does not match the desired state.");
                     break
