@@ -66,6 +66,8 @@ function Get-TargetResource
                 $BindingObject = get-WebBindingObject -BindingInfo $binding
                 New-CimInstance -ClassName PSHOrg_cWebBindingInformation -Namespace root/microsoft/Windows/DesiredStateConfiguration -Property @{Port=[System.UInt16]$BindingObject.Port;Protocol=$BindingObject.Protocol;IPAddress=$BindingObject.IPaddress;HostName=$BindingObject.Hostname;CertificateThumbprint=$BindingObject.CertificateThumbprint;CertificateStoreName=$BindingObject.CertificateStoreName} -ClientOnly
             }
+
+            $LogFileDirectory = Get-ItemProperty "IIS:\Sites\$Name" -Name logFile.directory.Value
         }
         else # Multiple websites with the same name exist. This is not supported and is an error
         {
@@ -88,6 +90,7 @@ function Get-TargetResource
                                         ApplicationPool = $Website.applicationPool;
                                         BindingInfo = $CimBindings;
                                         webConfigProp = $CimWebConfigProp;
+                                        LogFileDirectory = $LogFileDirectory
                                     }
         
         return $getTargetResourceResult;
@@ -118,8 +121,9 @@ function Set-TargetResource
 
         [Microsoft.Management.Infrastructure.CimInstance[]]$BindingInfo,
 
-        [Microsoft.Management.Infrastructure.CimInstance[]]$webConfigProp
+        [Microsoft.Management.Infrastructure.CimInstance[]]$webConfigProp,
 
+        [string]$LogFileDirectory = $null   # null default means it will not be changed from the default
     )
  
     $getTargetResourceResult = $null;
@@ -139,16 +143,81 @@ function Set-TargetResource
         #web configuration properties will be added to site using separate cmdlet
         $Result = $psboundparameters.Remove("webConfigProp");
 
+        #Remove LogFileDirectory property from parameters if it exists
+        $Result = $psboundparameters.Remove("LogFileDirectory");
+
         # Check if WebAdministration module is present for IIS cmdlets
         if(!(Get-Module -ListAvailable -Name WebAdministration))
         {
             Throw "Please ensure that WebAdministration module is installed."
         }
+
         $website = Get-Website | Where-Object {$_.Name -eq $name}
 
-        if($website -ne $null)
+        if($website -eq $null) # Website doesn't exist so create new one
+        {  
+            try
+            {
+                $Websites = Get-Website
+
+                if($BindingInfo -ne $null)
+                {   # try to spin the site up  on the correct port rather than potentially making a mess on 80
+                    $Port = $BindingInfo[0].Port
+                }
+                else # no port provided, 80 is being asked for
+                {
+                     $Port = 80
+                }
+                
+                if ($Websites -eq $null)
+                {
+                    # We do not have any sites this will cause a break in 2008R2
+                    $Website = New-Website @psboundparameters -ID 0 -Port $Port
+                }
+                else
+                {
+                    $Website = New-Website @psboundparameters -Port $Port
+                }
+
+                $Result = Stop-Website $Website.name -ErrorAction Stop
+
+                #Clear default bindings if new bindings defined and are different
+                if($BindingInfo -ne $null)
+                {
+                    if(ValidateWebsiteBindings -Name $Name -BindingInfo $BindingInfo)
+                    {
+                        UpdateBindings -Name $Name -BindingInfo $BindingInfo
+                    }
+                }
+
+                Write-Verbose("successfully created website $Name")
+                
+                #Start site if required
+                if($State -eq "Started")
+                {
+                    #Wait 1 sec for bindings to take effect
+                    #I have found that starting the website results in an error if it happens to quickly
+                    Start-Sleep -s 1
+                    Start-Website -Name $Name -ErrorAction Stop
+                }
+
+                Write-Debug("successfully started website $Name")
+            }
+            catch
+            {
+                Write-Verbose("Error creating $Name")
+                $errorId = "WebsiteCreationFailure"; 
+                $errorCategory = [System.Management.Automation.ErrorCategory]::InvalidOperation;
+                $errorMessage = $($LocalizedData.FeatureCreationFailureError) -f ${Name} ;
+                $exception = New-Object System.InvalidOperationException $errorMessage ;
+                $errorRecord = New-Object System.Management.Automation.ErrorRecord $exception, $errorId, $errorCategory, $null
+
+                $PSCmdlet.ThrowTerminatingError($errorRecord);
+            }
+        }  
+
+        if($website -ne $null) # found site, now update parameters if required
         {
-            #update parameters as required
             $UpdateNotRequired = $true
 
             #Update Physical Path if required
@@ -165,80 +234,54 @@ function Set-TargetResource
             {
                 foreach ($prop in $webConfigProp)
                 {
-                    #if location has a value we need to combine it with pspath to do get-webconfigurationproperty
-                    if($prop.CimInstanceProperties["Location"].Value)
-                    {
-                        $PSPath = $prop.CimInstanceProperties["PSPath"].Value + "/" + $prop.CimInstanceProperties["Location"].Value
-                    }
-                    else
-                    {
-                        $PSPath = $prop.CimInstanceProperties["PSPath"].Value
-                    }
+                    $propName = $prop.CimInstanceProperties["Name"].Value
+                    $filter  = $prop.CimInstanceProperties["Filter"].Value
+                    $PSPath = $prop.CimInstanceProperties["PSPath"].Value
+                    $location = $prop.CimInstanceProperties["Location"].Value
+
+                    #Write-Verbose("Processing property '$filter': '$propName'.");
+
+                    $propObject = Get-WebConfigurationProperty -Filter $filter -PSPath $PSPath -Location $location -Name $propName
                     
-                    Try
+                    if ($propObject -eq $null) # its a new property
                     {
-                        $propObject = Get-WebConfigurationProperty -Filter $prop.CimInstanceProperties["Filter"].Value -PSPath $PSPath -Name $prop.CimInstanceProperties["Name"].Value | Select Value
+                        Write-Verbose("Creating property '$filter': '$propName'.");
+                        Add-WebConfigurationProperty -filter $filter -pspath $PSPath -name $propName -Location $location -value $prop.CimInstanceProperties["Value"].Value
                     }
-                    Catch [System.IO.FileNotFoundException]
+                    else # the property exists, update if needed
                     {
-                        Write-Warning("Exception: $($_.Exception.Message)")
-                    }
-                        
-                    if($propObject -ne $null)
-                    {
-                        #get-webconfigurationproperty returns values differently depending on the property so we have to check if .Value is null or not and proceed accordingly
-                        if($propObject[0].Value)
+                        $currentValueStr = Read-WebsitePropertyValue $propObject
+                        $newValue = $prop.CimInstanceProperties["Value"].Value
+
+                        if($currentValueStr -ne $newValue)
                         {
-                            if($propObject[0].Value.toString() -ne $prop.CimInstanceProperties["Value"].Value.toString())#produces inconsistent results without toString
+                            $UpdateNotRequired = $false
+                            
+                            # try to update the property
+                            try
                             {
-                                $UpdateNotRequired = $false
-                                
-                                #use the location parameter if it is specified
-                                if($prop.CimInstanceProperties["Location"].Value)
-                                {
-                                    Set-WebConfigurationProperty -filter $prop.CimInstanceProperties["Filter"].Value -pspath $prop.CimInstanceProperties["PSPath"].Value -location $prop.CimInstanceProperties["Location"].Value -name $prop.CimInstanceProperties["Name"].Value -value $prop.CimInstanceProperties["Value"].Value
-                                }
-                                else
-                                {
-                                    Set-WebConfigurationProperty -filter $prop.CimInstanceProperties["Filter"].Value -pspath $prop.CimInstanceProperties["PSPath"].Value -name $prop.CimInstanceProperties["Name"].Value -value $prop.CimInstanceProperties["Value"].Value
-                                }
-                                
-                                $propName = $prop.CimInstanceProperties["Name"].Value
-                                Write-Verbose("$propName for website $Name have been updated.")
+                                Set-WebConfigurationProperty -filter $filter -pspath $PSPath -Location $location -name $propName -value $newValue
+
+                                Write-Verbose("Updating '$location': '$filter'...")
+                                Write-Verbose("Changing '$propName': from '$currentValueStr' to '$newValue'!")
                             }
-                        }
-                        else
-                        {
-                            if($propObject[0].toString() -ne $prop.CimInstanceProperties["Value"].Value.toString())#produces inconsistent results without toString
+                            catch
                             {
-                                $UpdateNotRequired = $false
-                                
-                                #use the location parameter if it is specified
-                                if($prop.CimInstanceProperties["Location"].Value)
-                                {
-                                    Set-WebConfigurationProperty -filter $prop.CimInstanceProperties["Filter"].Value -pspath $prop.CimInstanceProperties["PSPath"].Value -location $prop.CimInstanceProperties["Location"].Value -name $prop.CimInstanceProperties["Name"].Value -value $prop.CimInstanceProperties["Value"].Value
-                                }
-                                else
-                                {
-                                    Set-WebConfigurationProperty -filter $prop.CimInstanceProperties["Filter"].Value -pspath $prop.CimInstanceProperties["PSPath"].Value -name $prop.CimInstanceProperties["Name"].Value -value $prop.CimInstanceProperties["Value"].Value
-                                }
-                                
-                                $propName = $prop.CimInstanceProperties["Name"].Value
-                                Write-Verbose("$propName for website $Name have been updated.")
+                                Write-Error("Error updating '$location': '$filter': '$propName': '$_.Exception.Message'")
+                                Break
                             }
-                        }
-                    }
-                    else
-                    {
-                        Write-Warning("Could not find $PSPath " + $prop.CimInstanceProperties["Filter"].Value + " " + $prop.CimInstanceProperties["Name"].Value)
-                    }
-                
+                            
+                        }   
+                    }                             
                 }
             }
-        
+
             #Update Bindings if required
             if ($BindingInfo -ne $null)
             {
+                # ValidateWebsiteBindings actually does a compare in its last line,
+                # so it returns True if there are pending changes, I think the method should be changed,
+                # maybe they should called separately...seems like a small change could help 
                 if(ValidateWebsiteBindings -Name $Name -BindingInfo $BindingInfo)
                 {
                     $UpdateNotRequired = $false
@@ -258,6 +301,13 @@ function Set-TargetResource
                 Write-Verbose("Application Pool for website $Name has been updated to $ApplicationPool")
             }
 
+            # Update Log path if needed
+            if (ShouldUpdateLogFilePath $Name $LogFileDirectory)
+            {
+                $UpdateNotRequired = $false
+                Set-ItemProperty "IIS:\Sites\$Name" -name logFile.directory -Value $LogFileDirectory -ErrorAction Stop
+            }
+
             #Update State if required
             if($website.state -ne $State -and $State -ne "")
             {
@@ -266,9 +316,7 @@ function Set-TargetResource
                     $UpdateNotRequired = $false
                     if($State -eq "Started")
                     {
-                    
-                            Start-Website -Name $Name
-                    
+                        Start-Website -Name $Name
                     }
                     else
                     {
@@ -295,77 +343,10 @@ function Set-TargetResource
                 Write-Verbose("Website $Name already exists and properties do not need to be updated.");
             }
             
-
         }
-        else #Website doesn't exist so create new one
-        {
-            try
-            {
-                $Websites = Get-Website
-                if ($Websites -eq $null)
-                {
-                    # We do not have any sites this will cause a break in 2008R2
-                    $Website = New-Website @psboundparameters -ID 0
-                }
-                else
-                {
-                    $Website = New-Website @psboundparameters
-                }
-                $Result = Stop-Website $Website.name -ErrorAction Stop
-        
-                #Clear default bindings if new bindings defined and are different
-                if($BindingInfo -ne $null)
-                {
-                    if(ValidateWebsiteBindings -Name $Name -BindingInfo $BindingInfo)
-                    {
-                        UpdateBindings -Name $Name -BindingInfo $BindingInfo
-                    }
-                }
-
-                #Update Web Configuration Properties if needed
-                if ($webConfigProp -ne $null)
-                {
-
-                    foreach ($prop in $webConfigProp)
-                    {
-
-                        #use the location parameter if it is specified
-                        if($prop.CimInstanceProperties["Location"].Value)
-                        {
-                            Set-WebConfigurationProperty -filter $prop.CimInstanceProperties["Filter"].Value -pspath $prop.CimInstanceProperties["PSPath"].Value -location $prop.CimInstanceProperties["Location"].Value -name $prop.CimInstanceProperties["Name"].Value -value $prop.CimInstanceProperties["Value"].Value
-                        }
-                        else
-                        {
-                            Set-WebConfigurationProperty -filter $prop.CimInstanceProperties["Filter"].Value -pspath $prop.CimInstanceProperties["PSPath"].Value -name $prop.CimInstanceProperties["Name"].Value -value $prop.CimInstanceProperties["Value"].Value
-                        }
-                    }
-                }
-                Write-Verbose("successfully created website $Name")
-                
-                #Start site if required
-                if($State -eq "Started")
-                {
-                    #Wait 1 sec for bindings to take effect
-                    #I have found that starting the website results in an error if it happens to quickly
-                    Start-Sleep -s 1
-                    Start-Website -Name $Name -ErrorAction Stop
-                }
-
-                Write-Verbose("successfully started website $Name")
-            }
-            catch
-            {
-                $errorId = "WebsiteCreationFailure"; 
-                $errorCategory = [System.Management.Automation.ErrorCategory]::InvalidOperation;
-                $errorMessage = $($LocalizedData.FeatureCreationFailureError) -f ${Name} ;
-                $exception = New-Object System.InvalidOperationException $errorMessage ;
-                $errorRecord = New-Object System.Management.Automation.ErrorRecord $exception, $errorId, $errorCategory, $null
-
-                $PSCmdlet.ThrowTerminatingError($errorRecord);
-            }
-        }    
-    }
-    else #Ensure is set to "Absent" so remove website 
+  
+    } # end of if($Ensure -eq "Present")
+    elseif($Ensure -eq "Absent") #Ensure is set to "Absent" so remove website 
     { 
         try
         {
@@ -395,7 +376,6 @@ function Set-TargetResource
     }
 }
 
-
 # The Test-TargetResource cmdlet is used to validate if the role or feature is in a state as expected in the instance document.
 function Test-TargetResource 
 {
@@ -420,7 +400,9 @@ function Test-TargetResource
 
         [Microsoft.Management.Infrastructure.CimInstance[]]$BindingInfo,
         
-        [Microsoft.Management.Infrastructure.CimInstance[]]$webConfigProp
+        [Microsoft.Management.Infrastructure.CimInstance[]]$webConfigProp,
+
+        [string]$LogFileDirectory   # null default means it will not be changed from the default
     )
 
     $DesiredConfigurationMatch = $true;
@@ -432,7 +414,6 @@ function Test-TargetResource
     }
 
     $website = Get-Website | Where-Object {$_.Name -eq $name}
-    $Stop = $true
 
     Do  
     {
@@ -471,87 +452,73 @@ function Test-TargetResource
                 break
             }
 
+            if (ShouldUpdateLogFilePath $Name $LogFileDirectory)
+            {
+                $DesiredConfigurationMatch = $false
+                break
+            }
+
             #Check Web Configuration Properties
             foreach ($prop in $webConfigProp)
             {
+                $propName = $prop.CimInstanceProperties["Name"].Value
+                $filter  = $prop.CimInstanceProperties["Filter"].Value
+                $location = $prop.CimInstanceProperties["Location"].Value
+                $PSPath = $prop.CimInstanceProperties["PSPath"].Value
                 #if location has a value we need to combine it with pspath to do get-webconfigurationproperty
+                #if($prop.CimInstanceProperties["Location"].Value)
+                #{
+                #    $PSPath += "/" + $prop.CimInstanceProperties["Location"].Value
+                #}
+
+                $propObject = Get-WebConfigurationProperty -Filter $filter -PSPath $PSPath -Name $propName -Location $location
                 
-                if($prop.CimInstanceProperties["Location"].Value)
+                if ($propObject -eq $null)
                 {
-                    $PSPath = $prop.CimInstanceProperties["PSPath"].Value + "/" + $prop.CimInstanceProperties["Location"].Value
+                    $DesiredConfigurationMatch = $false
+                    Write-Verbose("'$filter': '$propName' does not exists.")
+                    break
                 }
-                else
-                {
-                    $PSPath = $prop.CimInstanceProperties["PSPath"].Value
-                }
+
+                $currentValueStr = Read-WebsitePropertyValue $propObject
                 
-                Try
+                $newValue = $prop.CimInstanceProperties["Value"].Value
+
+                if($currentValueStr -ne $newValue)
                 {
-                    $propObject = Get-WebConfigurationProperty -Filter $prop.CimInstanceProperties["Filter"].Value -PSPath $PSPath -Name $prop.CimInstanceProperties["Name"].Value
-                }
-                Catch [System.IO.FileNotFoundException]
-                {
-                    Write-Warning("Exception: $($_.Exception.Message)")
-                }
-                
-                if($propObject -ne $null)
-                {
-                    #get-webconfigurationproperty returns values differently depending on the property so we have to check if .Value is null or not and proceed accordingly
-                    if ($propObject[0].Value)
-                    {
-                        if($propObject[0].Value.toString() -ne $prop.CimInstanceProperties["Value"].Value.toString())#produces inconsistent results without toString
-                        {
-                            $DesiredConfigurationMatch = $false
-                            $propName = $prop.CimInstanceProperties["Name"].Value
-                            Write-Verbose("$propName for Website $Name does not match the desired state.");
-                            break
-                        }
-                    }
-                    else
-                    {                    
-                        if($propObject -ne $prop.CimInstanceProperties["Value"].Value.toString())#produces inconsistent results without toString
-                        {
-                            $DesiredConfigurationMatch = $false
-                            $propName = $prop.CimInstanceProperties["Name"].Value
-                            Write-Verbose("$propName for Website $Name does not match the desired state.");
-                            break
-                        }
-                    }
-                }
-                else
-                {
-                    Write-Warning("Could not find $PSPath " + $prop.CimInstanceProperties["Filter"].Value + " " + $prop.CimInstanceProperties["Name"].Value)
+                    $DesiredConfigurationMatch = $false
+                    Write-Verbose("'$location': '$filter' does not match the desired state...")
+                    Write-Verbose("'$propName': is '$currentValueStr', it should be '$newValue'.")
+                    break
                 }
             }
             
-                #Check Binding properties
-                if($BindingInfo -ne $null)
+            #Check Binding properties
+            if($BindingInfo -ne $null)
+            {
+                if(ValidateWebsiteBindings -Name $Name -BindingInfo $BindingInfo)
                 {
-                    if(ValidateWebsiteBindings -Name $Name -BindingInfo $BindingInfo)
-                    {
-                        $DesiredConfigurationMatch = $false
-                        Write-Verbose("Bindings for website $Name do not match the desired state.");
-                        break
-                    }
-
+                    $DesiredConfigurationMatch = $false
+                    Write-Verbose("Bindings for website $Name do not match the desired state.");
+                    break
                 }
+            }
             
-            $Stop = $false
         }
     }
-	While($Stop) 
+    While($false) # this is just a techique to make the Break work above
     
     $DesiredConfigurationMatch;
 }
 
 #region HelperFunctions
+
 # ValidateWebsite is a helper function used to validate the results 
 function ValidateWebsite 
 {
     param 
     (
         [object] $Website,
-
         [string] $Name
     )
 
@@ -575,7 +542,6 @@ function ValidateWebsitePath
     param
     (
         [string] $Name,
-
         [string] $PhysicalPath
     )
 
@@ -587,7 +553,6 @@ function ValidateWebsitePath
     }
 
     $PathNeedsUpdating
-
 }
 
 # Helper function used to validate website bindings
@@ -605,8 +570,7 @@ function ValidateWebsiteBindings
         [Microsoft.Management.Infrastructure.CimInstance[]]
         $BindingInfo
     )
-
-   
+       
     $Valid = $true
 
     foreach($binding in $BindingInfo)
@@ -852,23 +816,23 @@ function UpdateBindings
                     
         #Set IP Address parameter
         if($IPAddress -ne $null)
-                {
-                $bindingParams.Add('-IPAddress', $IPAddress)
-            }
+        {
+            $bindingParams.Add('-IPAddress', $IPAddress)
+        }
         else # Default to any/all IP Addresses
-                {
-                $bindingParams.Add('-IPAddress', '*')
-            }
+        {
+            $bindingParams.Add('-IPAddress', '*')
+        }
 
         #Set protocol parameter
         if($Protocol-ne $null)
-                {
-                $bindingParams.Add('-Protocol', $Protocol)
-            }
+        {
+            $bindingParams.Add('-Protocol', $Protocol)
+        }
         else #Default to Http
-                {
-                $bindingParams.Add('-Protocol', 'http')
-            }
+        {
+            $bindingParams.Add('-Protocol', 'http')
+        }
 
         #Set Host parameter if it exists
         if($HostHeader-ne $null){$bindingParams.Add('-HostHeader', $HostHeader)}
@@ -938,5 +902,50 @@ function get-WebBindingObject
     return $WebBindingObject
 }
 
+# Helper function used to see if log file path has changed
+function ShouldUpdateLogFilePath
+{
+    param
+    (
+        [string] $SiteName,
+        [string] $LogFileDirectory
+    )
+
+    $PathNeedsUpdating = $false
+
+    if (($LogFileDirectory) -and ($LogFileDirectory -ne "")) #is this value set?
+    {
+        
+        $LogFileDirectoryCurrent = Get-ItemProperty "IIS:\Sites\$SiteName" -Name logFile.directory.Value
+
+        if($LogFileDirectoryCurrent -ne $LogFileDirectory)
+        {
+            $PathNeedsUpdating = $true
+            Write-Verbose "logFile.directory changed from $LogFileDirectoryCurrent to $LogFileDirectory"
+        }
+    }
+
+    $PathNeedsUpdating
+}
+
+# Helper function to extract the value from a website property
+function Read-WebsitePropertyValue 
+{
+    [OutputType([string])]
+    param ([PSObject] $propObject)
+
+    if ($propObject -is [string])
+    {
+        $valueStr = $propObject
+        #Write-Verbose("propObject = '$valueStr' (read as String).")
+    }
+    else
+    {
+        $valueStr = $propObject[0].Value.toString()
+        #Write-Verbose("propObject = '$valueStr' (read via propObject[0].Value.ToString.)")
+    }
+
+    $valueStr;
+}
 
 #endregion
