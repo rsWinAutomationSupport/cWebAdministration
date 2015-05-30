@@ -245,6 +245,7 @@ function Set-TargetResource
                     
                     if ($propObject -eq $null) # its a new property
                     {
+                        $UpdateNotRequired = $false
                         Write-Verbose("Creating property '$filter': '$propName'.");
                         Add-WebConfigurationProperty -filter $filter -pspath $PSPath -name $propName -Location $location -value $prop.CimInstanceProperties["Value"].Value
                     }
@@ -465,11 +466,6 @@ function Test-TargetResource
                 $filter  = $prop.CimInstanceProperties["Filter"].Value
                 $location = $prop.CimInstanceProperties["Location"].Value
                 $PSPath = $prop.CimInstanceProperties["PSPath"].Value
-                #if location has a value we need to combine it with pspath to do get-webconfigurationproperty
-                #if($prop.CimInstanceProperties["Location"].Value)
-                #{
-                #    $PSPath += "/" + $prop.CimInstanceProperties["Location"].Value
-                #}
 
                 $propObject = Get-WebConfigurationProperty -Filter $filter -PSPath $PSPath -Name $propName -Location $location
                 
