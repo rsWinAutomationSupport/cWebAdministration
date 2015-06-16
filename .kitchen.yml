@@ -5,7 +5,8 @@ driver:
 
 transport:
   name: winrm
-
+  password: <%= ENV['HYPERV_PASSWORD'] %>
+  
 verifier:
   name: pester
 
@@ -16,8 +17,6 @@ platforms:
   - name: windows_2012r2_wmf4
     driver:
       parent_vhd_name: 'Windows2012R2-Base.vhd'
-      password: <%= ENV['HYPERV_PASSWORD'] %>
-
 
 suites:
   - name: cWebsite_StartWebsite
