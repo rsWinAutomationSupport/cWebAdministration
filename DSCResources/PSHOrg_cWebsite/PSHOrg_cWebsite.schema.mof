@@ -29,5 +29,6 @@ class PSHOrg_cWebsite : OMI_BaseResource
   [write, EmbeddedInstance("PSHOrg_cWebBindingInformation"), Description("Hashtable containing binding information (Port, Protocol, IPAddress, HostName, CertificateThumbPrint, CertificateStore)")] string BindingInfo[];
   [write, EmbeddedInstance("PSHOrg_cWebConfigProp"), Description("Hashtable containing Web Configuration Properties (Filter, PSPath, Name, Location, Value)")] string webConfigProp[];
   [write] string ApplicationPool;
+  [write] string LogFileDirectory;
   [read] string Id;
 };
